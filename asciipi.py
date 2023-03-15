@@ -63,7 +63,7 @@ def pi_ascii_art(width: int = None, *, inverted: bool = True) -> str:
             else:
                 line.append(' ')
             if num_chars == width:
-                lines.append(''.join(line))
+                lines.append(''.join(line).rstrip())
                 line = []
                 num_chars = 0
     return '\n'.join(lines)
