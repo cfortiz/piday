@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import hashlib
 import sys
 import traceback
 from decimal import Decimal, localcontext
@@ -13,6 +14,8 @@ DEFAULT_PRECISION: int = 100
 DEFAULT_TEXT_WIDTH: int = 80
 DEFAULT_TEXT_HEIGHT: int = 24
 DEFAULT_SOURCE_IMAGE: str = 'pi.png'
+DEFAULT_FORMULA_NAME: str = 'agm'
+DEFAULT_SAFETY_FACTOR: float = 2.0001
 
 Formula = Type[Callable[[int], str]]
 
@@ -22,26 +25,42 @@ def compute_pi(precision: int = DEFAULT_PRECISION,
     """Compute π to the specified decimal precision with the given formula."""
     
     if formula is None:
-        formula = compute_pi_agm
+        formula = get_formula(DEFAULT_FORMULA_NAME)
 
-    original_max_str_digits = sys.get_int_max_str_digits()
-    conversion_precision = precision*2
-    changed_max_str_digits: bool = False
-    try:
+    return formula(precision)
+
+
+_last_precision = None
+def _prepare_for_conversion(precision: int, safety_factor: float = None) -> None:
+    global _last_precision
+    
+    if safety_factor is None:
+        safety_factor = DEFAULT_SAFETY_FACTOR
+    
+    if not _last_precision or precision > _last_precision:
+        conversion_precision = int(precision * safety_factor)
         with contextlib.suppress(ValueError):        
             sys.set_int_max_str_digits(conversion_precision)
-            changed_max_str_digits = True
-        return formula(precision)
-    finally:
-        if changed_max_str_digits:
-            with contextlib.suppress(ValueError):        
-                sys.set_int_max_str_digits(original_max_str_digits)
+            _last_precision = precision
 
 
+def get_formula(formula_name: str) -> Formula:
+    """Get the formula with the given name."""
+    
+    if formula_name is None:
+        formula_name = DEFAULT_FORMULA_NAME
+    
+    try:
+        return globals()[formula_name]
+    except KeyError:
+        return globals()[f'compute_pi_{formula_name}']
+
+    
 def compute_pi_bbp(precision: int = DEFAULT_PRECISION) -> str:
     """Compute π to the specified decimal precision using the BBP formula."""
     precision_padding: int = 4
     
+    _prepare_for_conversion(precision)
     with localcontext() as ctx:
         ctx.prec = precision + precision_padding
 
@@ -70,6 +89,8 @@ def compute_pi_bbp(precision: int = DEFAULT_PRECISION) -> str:
 def compute_pi_machin(precision: int = DEFAULT_PRECISION) -> str:
     """Compute π to the specified decimal precision using Machin's formula."""
     precision_padding: int = 4
+
+    _prepare_for_conversion(precision)
     with localcontext() as ctx:
         ctx.prec = precision + precision_padding
         
@@ -85,6 +106,8 @@ def compute_pi_machin(precision: int = DEFAULT_PRECISION) -> str:
 def compute_pi_agm(precision: int = DEFAULT_PRECISION) -> str:
     """Compute π to the specified decimal precision using the AGM formula."""
     precision_padding: int = 3
+
+    _prepare_for_conversion(precision)
     with localcontext() as ctx:
         ctx.prec = precision + precision_padding
         epsilon = Decimal(10)**(-precision) / Decimal(2)
@@ -157,7 +180,8 @@ def pi_ascii_art(width: int = None,
                  height: int = None,
                  source_image: str = None,
                  inverted: bool = False,
-                 keep_aspect_ratio: bool = False) -> str:
+                 keep_aspect_ratio: bool = False,
+                 formula: Formula = None) -> str:
     """Format π as ASCII art."""
     
     if width is None:
@@ -182,7 +206,7 @@ def pi_ascii_art(width: int = None,
         num_digits: int = sum(map(need_digit, pixels))
         if num_digits+1 > sys.get_int_max_str_digits():
             sys.set_int_max_str_digits(num_digits+1)
-        pi_str: str = compute_pi(num_digits)
+        pi_str: str = compute_pi(num_digits, formula)
         pi_index: int = 0
         num_chars: int = 0
         for pixel in pixels:
@@ -236,7 +260,7 @@ def main():
             test_formulas()
             exit_code = success_code
         elif opts.test_formula is not None:
-            formula: Formula = globals()[opts.test_formula]
+            formula: Formula = get_formula(opts.test_formula)
             test_formula(formula)
             exit_code = success_code
         else:
@@ -272,6 +296,9 @@ def get_script_options() -> argparse.Namespace:
                         action='store_true', default=False,
                         help='Print the raw digits of π.  Width specifies '
                              'number of digits.')
+    parser.add_argument('-f', '--formula',
+                        type=str, default=None,
+                        help='The formula to use for computing pi.')
     parser.add_argument('--test-formulas',
                         action='store_true', default=False,
                         help='Test the formulas for computing pi.')
@@ -296,9 +323,11 @@ def print_pi(opts: argparse.Namespace) -> None:
     
     raw: bool = opts.raw
     
+    formula: Formula = get_formula(opts.formula)
+    
     if not raw:
         print(pi_ascii_art(width, height, source_image, inverted,
-                           keep_aspect_ratio))
+                           keep_aspect_ratio, formula))
     else:
         print(compute_pi(width))
 
@@ -316,30 +345,44 @@ def print_exception(e: Exception, *,
 def test_formulas() -> None:
     """Test the formulas."""
     
-    formulas = [
-        compute_pi_bbp,
-        compute_pi_machin,
-        compute_pi_agm,
-    ]
+    formulas = ['agm', 'bbp', 'machin']
 
-    for formula in formulas:
+    for formula in map(get_formula, formulas):
         test_formula(formula)
 
 
 def test_formula(formula: Formula) -> None:
-    expected_last_10_digits = {
-        10**1: '1415926535',
-        10**2: '3421170679',
-        10**3: '2164201989',
-        10**4: '5256375678',
-        10**5: '5493624646',
+    expected_results = {
+        10**1: dict(last_digits='1415926535',
+                    digest='330548c742a7c77a612f6d5c2ba2b291'
+                           '7c1533c0cb71a163feef53efe3cbee09'),
+        10**2: dict(last_digits='3421170679',
+                    digest='aa6eee625a838a2af84f7d591e8c677b'
+                           'dd9c1b07c44380e2fee8fc738f9234f0'),
+        10**3: dict(last_digits='2164201989',
+                    digest='823a2e34f63c5d5f30a27733976df5a1'
+                           'ab57feaab505f40d95d3dd3fefa425cc'),
+        10**4: dict(last_digits='5256375678',
+                    digest='452304d0e15d9e9fd9b63024212bb571'
+                           'de54b9b9f0aa050481f90530ef0b5c5d'),
     }
     
-    for precision, expected in expected_last_10_digits.items():
+    for precision, expected_result in expected_results.items():
         pi = compute_pi(precision, formula)
-        actual = pi[-10:]
-        assert actual == expected, f'Expected {expected}, got {actual} for {formula=} and {precision=}.'
-        print(f'Formula {formula.__name__} passed for precision {precision}.')
+        expected_last_digits = expected_result['last_digits']
+        expected_digest = expected_result['digest']
+        actual_last_digits = pi[-10:]
+        actual_digest = sha256sum(pi)
+        last_digits_passed = actual_last_digits == expected_last_digits
+        digest_passed = actual_digest == expected_digest
+        if last_digits_passed and digest_passed:
+            print(f'Formula {formula.__name__} passed for precision {precision}.')
+        else:
+            print(f'Formula {formula.__name__} failed for precision {precision}.')
+
+
+def sha256sum(string):
+    return hashlib.sha256(string.encode()).hexdigest()
 
 
 if __name__ == '__main__':

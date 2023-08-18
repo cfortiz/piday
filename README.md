@@ -20,3 +20,5 @@ number of decimal digits.
 - Refactor to make formulas for computing pi modular.
 - Add command line parameter to specify formula.
 - Add command line parameters to test formulas, all formulas or specific ones.
+- Fix issue raising `ValueError` when converting `int` to `str` for large
+integers in or with `decimal.Decimal`.
