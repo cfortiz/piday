@@ -20,6 +20,33 @@ DEFAULT_SAFETY_FACTOR: float = 2.0001
 Formula = Type[Callable[[int], str]]
 
 
+def main():
+    width: int
+
+    success_code: int = 0
+    failure_code: int = 1
+    
+    exit_code: int = failure_code
+    
+    try:
+        opts = get_script_options()
+        
+        if opts.test_formulas:
+            test_formulas()
+            exit_code = success_code
+        elif opts.test_formula is not None:
+            formula: Formula = get_formula(opts.test_formula)
+            test_formula(formula)
+            exit_code = success_code
+        else:
+            print_pi(opts)
+            
+    except Exception as e:
+        print_exception(e)
+    
+    return 0
+
+
 def compute_pi(precision: int = DEFAULT_PRECISION,
                formula: Formula = None) -> str:
     """Compute π to the specified decimal precision with the given formula."""
@@ -28,20 +55,6 @@ def compute_pi(precision: int = DEFAULT_PRECISION,
         formula = get_formula(DEFAULT_FORMULA_NAME)
 
     return formula(precision)
-
-
-_last_precision = None
-def _prepare_for_conversion(precision: int, safety_factor: float = None) -> None:
-    global _last_precision
-    
-    if safety_factor is None:
-        safety_factor = DEFAULT_SAFETY_FACTOR
-    
-    if not _last_precision or precision > _last_precision:
-        conversion_precision = int(precision * safety_factor)
-        with contextlib.suppress(ValueError):        
-            sys.set_int_max_str_digits(conversion_precision)
-            _last_precision = precision
 
 
 def get_formula(formula_name: str) -> Formula:
@@ -176,6 +189,42 @@ def decimal_atan2(y: Decimal, x: Decimal = None) -> Decimal:
     return total
 
 
+_last_precision = None
+def _prepare_for_conversion(precision: int, safety_factor: float = None) -> None:
+    global _last_precision
+    
+    if safety_factor is None:
+        safety_factor = DEFAULT_SAFETY_FACTOR
+    
+    if not _last_precision or precision > _last_precision:
+        conversion_precision = int(precision * safety_factor)
+        with contextlib.suppress(ValueError):        
+            sys.set_int_max_str_digits(conversion_precision)
+            _last_precision = precision
+
+
+def print_pi(opts: argparse.Namespace) -> None:
+    """Print π to the specified width and height."""
+    width: int
+    height: int
+    width, height = opts.width, opts.height
+    
+    source_image: str = opts.source_image
+    
+    inverted: bool = opts.inverted
+    keep_aspect_ratio: bool = opts.keep_aspect_ratio
+    
+    raw: bool = opts.raw
+    
+    formula: Formula = get_formula(opts.formula)
+    
+    if not raw:
+        print(pi_ascii_art(width, height, source_image, inverted,
+                           keep_aspect_ratio, formula))
+    else:
+        print(compute_pi(width))
+
+
 def pi_ascii_art(width: int = None,
                  height: int = None,
                  source_image: str = None,
@@ -226,7 +275,8 @@ def pi_ascii_art(width: int = None,
 def resize_image(image: Image,
                  width: int, height: int = None, *,
                  keep_aspect_ratio: bool = True) -> Image:
-        
+    """Resize the image to the specified width and height."""
+    
     image_width, image_height = image.size
     image_aspect_ratio = image_width / image_height
 
@@ -243,33 +293,6 @@ def resize_image(image: Image,
     
     resized_image = image.resize((width, height), Image.LANCZOS)
     return resized_image
-
-
-def main():
-    width: int
-
-    success_code: int = 0
-    failure_code: int = 1
-    
-    exit_code: int = failure_code
-    
-    try:
-        opts = get_script_options()
-        
-        if opts.test_formulas:
-            test_formulas()
-            exit_code = success_code
-        elif opts.test_formula is not None:
-            formula: Formula = get_formula(opts.test_formula)
-            test_formula(formula)
-            exit_code = success_code
-        else:
-            print_pi(opts)
-            
-    except Exception as e:
-        print_exception(e)
-    
-    return 0
 
 
 def get_script_options() -> argparse.Namespace:
@@ -308,28 +331,6 @@ def get_script_options() -> argparse.Namespace:
 
     opts = parser.parse_args()
     return opts
-
-
-def print_pi(opts: argparse.Namespace) -> None:
-    """Print π to the specified width and height."""
-    width: int
-    height: int
-    width, height = opts.width, opts.height
-    
-    source_image: str = opts.source_image
-    
-    inverted: bool = opts.inverted
-    keep_aspect_ratio: bool = opts.keep_aspect_ratio
-    
-    raw: bool = opts.raw
-    
-    formula: Formula = get_formula(opts.formula)
-    
-    if not raw:
-        print(pi_ascii_art(width, height, source_image, inverted,
-                           keep_aspect_ratio, formula))
-    else:
-        print(compute_pi(width))
 
 
 def print_exception(e: Exception, *,
